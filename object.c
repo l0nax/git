@@ -127,7 +127,7 @@ static void grow_object_hash(struct repository *r)
 	int new_hash_size = r->parsed_objects->obj_hash_size < 32 ? 32 : 2 * r->parsed_objects->obj_hash_size;
 	struct object **new_hash;
 
-	new_hash = xcalloc(new_hash_size, sizeof(struct object *));
+	CALLOC_ARRAY(new_hash, new_hash_size);
 	for (i = 0; i < r->parsed_objects->obj_hash_size; i++) {
 		struct object *obj = r->parsed_objects->obj_hash[i];
 
@@ -177,12 +177,11 @@ void *object_as_type(struct object *obj, enum object_type type, int quiet)
 	}
 }
 
-struct object *lookup_unknown_object(const struct object_id *oid)
+struct object *lookup_unknown_object(struct repository *r, const struct object_id *oid)
 {
-	struct object *obj = lookup_object(the_repository, oid);
+	struct object *obj = lookup_object(r, oid);
 	if (!obj)
-		obj = create_object(the_repository, oid,
-				    alloc_object_node(the_repository));
+		obj = create_object(r, oid, alloc_object_node(r));
 	return obj;
 }
 
@@ -478,7 +477,7 @@ struct parsed_object_pool *parsed_object_pool_new(void)
 	o->object_state = allocate_alloc_state();
 
 	o->is_shallow = -1;
-	o->shallow_stat = xcalloc(1, sizeof(*o->shallow_stat));
+	CALLOC_ARRAY(o->shallow_stat, 1);
 
 	o->buffer_slab = allocate_commit_buffer_slab();
 
