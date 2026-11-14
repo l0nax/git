@@ -1,6 +1,7 @@
 #!/bin/sh
 
 test_description='diff.*.textconv tests'
+
 . ./test-lib.sh
 
 find_diff() {
@@ -19,19 +20,12 @@ cat >expect.text <<'EOF'
 +1
 EOF
 
-cat >hexdump <<'EOF'
-#!/bin/sh
-"$PERL_PATH" -e '$/ = undef; $_ = <>; s/./ord($&)/ge; print $_' < "$1"
-EOF
-chmod +x hexdump
-
 test_expect_success 'setup binary file with history' '
-	printf "\\0\\n" >file &&
-	git add file &&
-	git commit -m one &&
-	printf "\\01\\n" >>file &&
-	git add file &&
-	git commit -m two
+	write_script hexdump <<-\EOF &&
+	tr "\000\001" "01" <"$1"
+	EOF
+	test_commit --printf one file "\\0\\n" &&
+	test_commit --printf --append two file "\\01\\n"
 '
 
 test_expect_success 'file is considered binary by porcelain' '

@@ -2,15 +2,16 @@
  * Copyright (c) 2010 Ævar Arnfjörð Bjarmason
  */
 
-#include "cache.h"
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
+#include "git-compat-util.h"
+#include "abspath.h"
+#include "environment.h"
 #include "exec-cmd.h"
 #include "gettext.h"
-#include "strbuf.h"
 #include "utf8.h"
-#include "config.h"
 
 #ifndef NO_GETTEXT
-#	include <locale.h>
 #	include <libintl.h>
 #	ifdef GIT_WINDOWS_NATIVE
 
@@ -66,6 +67,7 @@ const char *get_preferred_languages(void)
 }
 
 #ifndef NO_GETTEXT
+__attribute__((format (printf, 1, 2)))
 static int test_vsnprintf(const char *fmt, ...)
 {
 	char buf[26];
@@ -79,7 +81,6 @@ static int test_vsnprintf(const char *fmt, ...)
 
 static void init_gettext_charset(const char *domain)
 {
-	setlocale(LC_CTYPE, "");
 	charset = locale_charset();
 	bind_textdomain_codeset(domain, charset);
 
@@ -101,6 +102,8 @@ static void init_gettext_charset(const char *domain)
 		setlocale(LC_CTYPE, "C");
 }
 
+int git_gettext_enabled = 0;
+
 void git_setup_gettext(void)
 {
 	const char *podir = getenv(GIT_TEXT_DOMAIN_DIR_ENVIRONMENT);
@@ -119,6 +122,8 @@ void git_setup_gettext(void)
 	setlocale(LC_TIME, "");
 	init_gettext_charset("git");
 	textdomain("git");
+
+	git_gettext_enabled = 1;
 
 	free(p);
 }

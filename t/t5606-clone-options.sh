@@ -11,7 +11,20 @@ test_expect_success 'setup' '
 	mkdir parent &&
 	(cd parent && git init &&
 	 echo one >file && git add file &&
-	 git commit -m one)
+	 git commit -m one) &&
+	git clone --depth=1 --no-local parent shallow-repo
+
+'
+
+test_expect_success 'submodule.stickyRecursiveClone flag manipulates submodule.recurse value' '
+
+	test_config_global submodule.stickyRecursiveClone true &&
+	git clone --recurse-submodules parent clone_recurse_true &&
+	test_cmp_config -C clone_recurse_true true submodule.recurse &&
+
+	test_config_global submodule.stickyRecursiveClone false &&
+	git clone --recurse-submodules parent clone_recurse_false &&
+	test_expect_code 1 git -C clone_recurse_false config --get submodule.recurse
 
 '
 
@@ -25,15 +38,16 @@ test_expect_success 'clone -o' '
 test_expect_success 'rejects invalid -o/--origin' '
 
 	test_must_fail git clone -o "bad...name" parent clone-bad-name 2>err &&
-	test_i18ngrep "'\''bad...name'\'' is not a valid remote name" err
+	test_grep "'\''bad...name'\'' is not a valid remote name" err
 
 '
 
-test_expect_success 'disallows --bare with --origin' '
+test_expect_success 'clone --bare -o' '
 
-	test_must_fail git clone -o foo --bare parent clone-bare-o 2>err &&
-	test_debug "cat err" &&
-	test_i18ngrep -e "--bare and --origin foo options are incompatible" err
+	git clone -o foo --bare parent clone-bare-o &&
+	(cd parent && pwd) >expect &&
+	git -C clone-bare-o config remote.foo.url >actual &&
+	test_cmp expect actual
 
 '
 
@@ -41,8 +55,40 @@ test_expect_success 'disallows --bare with --separate-git-dir' '
 
 	test_must_fail git clone --bare --separate-git-dir dot-git-destiation parent clone-bare-sgd 2>err &&
 	test_debug "cat err" &&
-	test_i18ngrep -e "--bare and --separate-git-dir are incompatible" err
+	test_grep -e "options .--bare. and .--separate-git-dir. cannot be used together" err
 
+'
+
+test_expect_success 'disallows --bundle-uri with shallow options' '
+	for option in --depth=1 --shallow-since=01-01-2000 --shallow-exclude=HEAD
+	do
+		test_must_fail git clone --bundle-uri=bundle $option from to 2>err &&
+		test_grep "bundle-uri.* cannot be used together" err || return 1
+	done
+'
+
+test_expect_success 'reject cloning shallow repository' '
+	test_when_finished "rm -rf repo" &&
+	test_must_fail git clone --reject-shallow shallow-repo out 2>err &&
+	test_grep -e "source repository is shallow, reject to clone." err &&
+
+	git clone --no-reject-shallow shallow-repo repo
+'
+
+test_expect_success 'reject cloning non-local shallow repository' '
+	test_when_finished "rm -rf repo" &&
+	test_must_fail git clone --reject-shallow --no-local shallow-repo out 2>err &&
+	test_grep -e "source repository is shallow, reject to clone." err &&
+
+	git clone --no-reject-shallow --no-local shallow-repo repo
+'
+
+test_expect_success 'succeed cloning normal repository' '
+	test_when_finished "rm -rf chilad1 child2 child3 child4 " &&
+	git clone --reject-shallow parent child1 &&
+	git clone --reject-shallow --no-local parent child2 &&
+	git clone --no-reject-shallow parent child3 &&
+	git clone --no-reject-shallow --no-local parent child4
 '
 
 test_expect_success 'uses "origin" for default remote name' '
@@ -73,6 +119,16 @@ test_expect_success 'prefers -c config over --template config' '
 
 '
 
+test_expect_success 'ignore --template config for core.bare' '
+
+	template="$TRASH_DIRECTORY/template-with-bare-config" &&
+	mkdir "$template" &&
+	git config --file "$template/config" core.bare true &&
+	git clone "--template=$template" parent clone-bare-config &&
+	test "$(git -C clone-bare-config config --local core.bare)" = "false" &&
+	test_path_is_missing clone-bare-config/HEAD
+'
+
 test_expect_success 'prefers config "clone.defaultRemoteName" over default' '
 
 	test_config_global clone.defaultRemoteName from_config &&
@@ -91,8 +147,8 @@ test_expect_success 'prefers --origin over -c config' '
 test_expect_success 'redirected clone does not show progress' '
 
 	git clone "file://$(pwd)/parent" clone-redirected >out 2>err &&
-	! grep % err &&
-	test_i18ngrep ! "Checking connectivity" err
+	test_grep ! % err &&
+	test_grep ! "Checking connectivity" err
 
 '
 
@@ -100,8 +156,16 @@ test_expect_success 'redirected clone -v does show progress' '
 
 	git clone --progress "file://$(pwd)/parent" clone-redirected-progress \
 		>out 2>err &&
-	grep % err
+	test_grep % err
 
+'
+
+test_expect_success 'clone does not segfault with --bare and core.bare=false' '
+	test_config_global core.bare false &&
+	git clone --bare parent clone-bare &&
+	echo true >expect &&
+	git -C clone-bare rev-parse --is-bare-repository >actual &&
+	test_cmp expect actual
 '
 
 test_expect_success 'chooses correct default initial branch name' '
@@ -109,7 +173,7 @@ test_expect_success 'chooses correct default initial branch name' '
 	git -c init.defaultBranch=foo init --bare empty &&
 	test_config -C empty lsrefs.unborn advertise &&
 	GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME= \
-	git -c init.defaultBranch=up clone empty whats-up &&
+	git -c init.defaultBranch=up -c protocol.version=2 clone empty whats-up &&
 	test refs/heads/foo = $(git -C whats-up symbolic-ref HEAD) &&
 	test refs/heads/foo = $(git -C whats-up config branch.foo.merge)
 '

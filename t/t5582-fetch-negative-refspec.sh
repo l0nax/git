@@ -105,7 +105,6 @@ test_expect_success "fetch with negative pattern refspec does not expand prefix"
 '
 
 test_expect_success "fetch with negative refspec avoids duplicate conflict" '
-	cd "$D" &&
 	(
 		cd one &&
 		git branch dups/a &&
@@ -238,6 +237,53 @@ test_expect_success "push with matching +: and negative refspec" '
 	# With "master" excluded, this push is a no-op.  Nothing gets
 	# pushed and it succeeds.
 	git -C two push -v one
+'
+
+test_expect_success '--prefetch correctly modifies refspecs' '
+	git -C one config --unset-all remote.origin.fetch &&
+	git -C one config --add remote.origin.fetch ^refs/heads/bogus/ignore &&
+	git -C one config --add remote.origin.fetch "refs/tags/*:refs/tags/*" &&
+	git -C one config --add remote.origin.fetch "refs/heads/bogus/*:bogus/*" &&
+
+	git tag -a -m never never-fetch-tag HEAD &&
+
+	git branch bogus/fetched HEAD~1 &&
+	git branch bogus/ignore HEAD &&
+
+	git -C one fetch --prefetch --no-tags &&
+	test_must_fail git -C one rev-parse never-fetch-tag &&
+	git -C one rev-parse refs/prefetch/bogus/fetched &&
+	test_must_fail git -C one rev-parse refs/prefetch/bogus/ignore &&
+
+	# correctly handle when refspec set becomes empty
+	# after removing the refs/tags/* refspec.
+	git -C one config --unset-all remote.origin.fetch &&
+	git -C one config --add remote.origin.fetch "refs/tags/*:refs/tags/*" &&
+
+	git -C one fetch --prefetch --no-tags &&
+	test_must_fail git -C one rev-parse never-fetch-tag &&
+
+	# The refspec for refs that are not fully qualified
+	# are filtered multiple times.
+	git -C one rev-parse refs/prefetch/bogus/fetched &&
+	test_must_fail git -C one rev-parse refs/prefetch/bogus/ignore
+'
+
+test_expect_success '--prefetch succeeds when refspec becomes empty' '
+	git checkout bogus/fetched &&
+	test_commit extra &&
+
+	git -C one config --unset-all remote.origin.fetch &&
+	git -C one config --unset branch.main.remote &&
+	git -C one config remote.origin.fetch "+refs/tags/extra" &&
+	git -C one config remote.origin.skipfetchall true &&
+	git -C one config remote.origin.tagopt "--no-tags" &&
+
+	git -C one fetch --prefetch
+'
+
+test_expect_success '--prefetch succeeds with empty command line refspec' '
+	git -C one fetch --prefetch origin +refs/tags/extra
 '
 
 test_done

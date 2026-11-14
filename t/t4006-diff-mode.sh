@@ -6,6 +6,7 @@
 test_description='Test mode change diffs.
 
 '
+
 . ./test-lib.sh
 
 sed_script='s/\(:100644 100755\) \('"$OID_REGEX"'\) \2 /\1 X X /'
@@ -26,10 +27,8 @@ test_expect_success 'chmod' '
 '
 
 test_expect_success 'prepare binary file' '
-	git commit -m rezrov &&
-	printf "\00\01\02\03\04\05\06" >binbin &&
-	git add binbin &&
-	git commit -m binbin
+	git commit -m one &&
+	test_commit --printf two binbin "\00\01\02\03\04\05\06"
 '
 
 test_expect_success '--stat output after text chmod' '

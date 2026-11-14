@@ -25,35 +25,37 @@ test_expect_success setup '
 	GIT_DIR=clone2/.git git update-index --add a
 '
 
-for clone in 1 2; do
-	cat >clone${clone}/.git/hooks/post-merge <<'EOF'
-#!/bin/sh
-echo $@ >> $GIT_DIR/post-merge.args
-EOF
-	chmod u+x clone${clone}/.git/hooks/post-merge
-done
+test_expect_success 'setup clone hooks' '
+	test_when_finished "rm -f hook" &&
+	cat >hook <<-\EOF &&
+	echo $@ >>$GIT_DIR/post-merge.args
+	EOF
+
+	test_hook --setup -C clone1 post-merge <hook &&
+	test_hook --setup -C clone2 post-merge <hook
+'
 
 test_expect_success 'post-merge does not run for up-to-date ' '
 	GIT_DIR=clone1/.git git merge $commit0 &&
-	! test -f clone1/.git/post-merge.args
+	test_path_is_missing clone1/.git/post-merge.args
 '
 
 test_expect_success 'post-merge runs as expected ' '
 	GIT_DIR=clone1/.git git merge $commit1 &&
-	test -e clone1/.git/post-merge.args
+	test_path_exists clone1/.git/post-merge.args
 '
 
 test_expect_success 'post-merge from normal merge receives the right argument ' '
-	grep 0 clone1/.git/post-merge.args
+	test_grep 0 clone1/.git/post-merge.args
 '
 
 test_expect_success 'post-merge from squash merge runs as expected ' '
 	GIT_DIR=clone2/.git git merge --squash $commit1 &&
-	test -e clone2/.git/post-merge.args
+	test_path_exists clone2/.git/post-merge.args
 '
 
 test_expect_success 'post-merge from squash merge receives the right argument ' '
-	grep 1 clone2/.git/post-merge.args
+	test_grep 1 clone2/.git/post-merge.args
 '
 
 test_done

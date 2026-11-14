@@ -1,6 +1,14 @@
+#include "git-compat-util.h"
 #include "diff-merges.h"
 
+#include "gettext.h"
 #include "revision.h"
+
+typedef void (*diff_merges_setup_func_t)(struct rev_info *);
+static void set_separate(struct rev_info *revs);
+
+static diff_merges_setup_func_t set_to_default = set_separate;
+static int suppress_m_parsing;
 
 static void suppress(struct rev_info *revs)
 {
@@ -9,14 +17,27 @@ static void suppress(struct rev_info *revs)
 	revs->combine_merges = 0;
 	revs->dense_combined_merges = 0;
 	revs->combined_all_paths = 0;
-	revs->combined_imply_patch = 0;
+	revs->merges_imply_patch = 0;
 	revs->merges_need_diff = 0;
+	revs->remerge_diff = 0;
+}
+
+static void common_setup(struct rev_info *revs)
+{
+	suppress(revs);
+	revs->merges_need_diff = 1;
+}
+
+static void set_none(struct rev_info *revs)
+{
+	suppress(revs);
 }
 
 static void set_separate(struct rev_info *revs)
 {
-	suppress(revs);
+	common_setup(revs);
 	revs->separate_merges = 1;
+	revs->simplify_history = 0;
 }
 
 static void set_first_parent(struct rev_info *revs)
@@ -25,57 +46,75 @@ static void set_first_parent(struct rev_info *revs)
 	revs->first_parent_merges = 1;
 }
 
-static void set_m(struct rev_info *revs)
-{
-	/*
-	 * To "diff-index", "-m" means "match missing", and to the "log"
-	 * family of commands, it means "show full diff for merges". Set
-	 * both fields appropriately.
-	 */
-	set_separate(revs);
-	revs->match_missing = 1;
-}
-
 static void set_combined(struct rev_info *revs)
 {
-	suppress(revs);
+	common_setup(revs);
 	revs->combine_merges = 1;
 	revs->dense_combined_merges = 0;
 }
 
 static void set_dense_combined(struct rev_info *revs)
 {
-	suppress(revs);
+	common_setup(revs);
 	revs->combine_merges = 1;
 	revs->dense_combined_merges = 1;
 }
 
+static void set_remerge_diff(struct rev_info *revs)
+{
+	common_setup(revs);
+	revs->remerge_diff = 1;
+	revs->simplify_history = 0;
+}
+
+static diff_merges_setup_func_t func_by_opt(const char *optarg)
+{
+	if (!strcmp(optarg, "off") || !strcmp(optarg, "none"))
+		return set_none;
+	if (!strcmp(optarg, "1") || !strcmp(optarg, "first-parent"))
+		return set_first_parent;
+	if (!strcmp(optarg, "separate"))
+		return set_separate;
+	if (!strcmp(optarg, "c") || !strcmp(optarg, "combined"))
+		return set_combined;
+	if (!strcmp(optarg, "cc") || !strcmp(optarg, "dense-combined"))
+		return set_dense_combined;
+	if (!strcmp(optarg, "r") || !strcmp(optarg, "remerge"))
+		return set_remerge_diff;
+	if (!strcmp(optarg, "m") || !strcmp(optarg, "on"))
+		return set_to_default;
+	return NULL;
+}
+
 static void set_diff_merges(struct rev_info *revs, const char *optarg)
 {
-	if (!strcmp(optarg, "off") || !strcmp(optarg, "none")) {
-		suppress(revs);
-		/* Return early to leave revs->merges_need_diff unset */
-		return;
-	}
+	diff_merges_setup_func_t func = func_by_opt(optarg);
 
-	if (!strcmp(optarg, "1") || !strcmp(optarg, "first-parent"))
-		set_first_parent(revs);
-	else if (!strcmp(optarg, "m") || !strcmp(optarg, "separate"))
-		set_separate(revs);
-	else if (!strcmp(optarg, "c") || !strcmp(optarg, "combined"))
-		set_combined(revs);
-	else if (!strcmp(optarg, "cc") || !strcmp(optarg, "dense-combined"))
-		set_dense_combined(revs);
-	else
-		die(_("unknown value for --diff-merges: %s"), optarg);
+	if (!func)
+		die(_("invalid value for '%s': '%s'"), "--diff-merges", optarg);
 
-	/* The flag is cleared by set_xxx() functions, so don't move this up */
-	revs->merges_need_diff = 1;
+	func(revs);
 }
 
 /*
  * Public functions. They are in the order they are called.
  */
+
+int diff_merges_config(const char *value)
+{
+	diff_merges_setup_func_t func = func_by_opt(value);
+
+	if (!func)
+		return -1;
+
+	set_to_default = func;
+	return 0;
+}
+
+void diff_merges_suppress_m_parsing(void)
+{
+	suppress_m_parsing = 1;
+}
 
 int diff_merges_parse_opts(struct rev_info *revs, const char **argv)
 {
@@ -83,16 +122,23 @@ int diff_merges_parse_opts(struct rev_info *revs, const char **argv)
 	const char *optarg;
 	const char *arg = argv[0];
 
-	if (!strcmp(arg, "-m")) {
-		set_m(revs);
+	if (!suppress_m_parsing && !strcmp(arg, "-m")) {
+		set_to_default(revs);
+		revs->merges_need_diff = 0;
 	} else if (!strcmp(arg, "-c")) {
 		set_combined(revs);
-		revs->combined_imply_patch = 1;
+		revs->merges_imply_patch = 1;
 	} else if (!strcmp(arg, "--cc")) {
 		set_dense_combined(revs);
-		revs->combined_imply_patch = 1;
+		revs->merges_imply_patch = 1;
+	} else if (!strcmp(arg, "--dd")) {
+		set_first_parent(revs);
+		revs->merges_imply_patch = 1;
+	} else if (!strcmp(arg, "--remerge-diff")) {
+		set_remerge_diff(revs);
+		revs->merges_imply_patch = 1;
 	} else if (!strcmp(arg, "--no-diff-merges")) {
-		suppress(revs);
+		set_none(revs);
 	} else if (!strcmp(arg, "--combined-all-paths")) {
 		revs->combined_all_paths = 1;
 	} else if ((argcount = parse_long_opt("diff-merges", argv, &optarg))) {
@@ -106,7 +152,7 @@ int diff_merges_parse_opts(struct rev_info *revs, const char **argv)
 
 void diff_merges_suppress(struct rev_info *revs)
 {
-	suppress(revs);
+	set_none(revs);
 }
 
 void diff_merges_default_to_first_parent(struct rev_info *revs)
@@ -137,9 +183,9 @@ void diff_merges_setup_revs(struct rev_info *revs)
 		revs->first_parent_merges = 0;
 	if (revs->combined_all_paths && !revs->combine_merges)
 		die("--combined-all-paths makes no sense without -c or --cc");
-	if (revs->combined_imply_patch)
+	if (revs->merges_imply_patch)
 		revs->diff = 1;
-	if (revs->combined_imply_patch || revs->merges_need_diff) {
+	if (revs->merges_imply_patch || revs->merges_need_diff) {
 		if (!revs->diffopt.output_format)
 			revs->diffopt.output_format = DIFF_FORMAT_PATCH;
 	}

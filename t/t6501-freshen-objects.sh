@@ -43,15 +43,25 @@ commit () {
 }
 
 maybe_repack () {
-	if test -n "$repack"; then
+	case "$title" in
+	loose)
+		: skip repack
+		;;
+	repack)
 		git repack -ad
-	fi
+		;;
+	bitmap)
+		git repack -adb
+		;;
+	*)
+		echo >&2 "unknown test type in maybe_repack"
+		return 1
+		;;
+	esac
 }
 
-for repack in '' true; do
-	title=${repack:+repack}
-	title=${title:-loose}
-
+for title in loose repack bitmap
+do
 	test_expect_success "make repo completely empty ($title)" '
 		rm -rf .git &&
 		git init
@@ -90,7 +100,7 @@ for repack in '' true; do
 	'
 
 	test_expect_success "simultaneous gc ($title)" '
-		git gc --prune=12.hours.ago
+		git gc --no-cruft --prune=12.hours.ago
 	'
 
 	test_expect_success "finish writing out commit ($title)" '
@@ -120,7 +130,7 @@ for repack in '' true; do
 	'
 
 	test_expect_success "simultaneous gc ($title)" '
-		git gc --prune=12.hours.ago
+		git gc --no-cruft --prune=12.hours.ago
 	'
 
 	# tree should have been refreshed by write-tree
@@ -140,8 +150,8 @@ test_expect_success 'do not complain about existing broken links (commit)' '
 	some message
 	EOF
 	commit=$(git hash-object -t commit -w broken-commit) &&
-	git gc -q 2>stderr &&
-	verbose git cat-file -e $commit &&
+	git gc --no-cruft -q 2>stderr &&
+	git cat-file -e $commit &&
 	test_must_be_empty stderr
 '
 
@@ -150,7 +160,7 @@ test_expect_success 'do not complain about existing broken links (tree)' '
 	100644 blob $(test_oid 003)	foo
 	EOF
 	tree=$(git mktree --missing <broken-tree) &&
-	git gc -q 2>stderr &&
+	git gc --no-cruft -q 2>stderr &&
 	git cat-file -e $tree &&
 	test_must_be_empty stderr
 '
@@ -165,7 +175,7 @@ test_expect_success 'do not complain about existing broken links (tag)' '
 	this is a broken tag
 	EOF
 	tag=$(git hash-object -t tag -w broken-tag) &&
-	git gc -q 2>stderr &&
+	git gc --no-cruft -q 2>stderr &&
 	git cat-file -e $tag &&
 	test_must_be_empty stderr
 '
